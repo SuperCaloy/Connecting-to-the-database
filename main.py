@@ -139,15 +139,16 @@ def get_task(id: int = Path(..., description="The ID of the task to retrieve")):
 
 @app.post("/tasks", status_code=status.HTTP_201_CREATED, summary="Create a new task")
 def create_task(payload: TaskCreate):
-    global next_id
-    new_task = {
-        "id": next_id,
-        "title": payload.title,
-        "done": False,
-    }
-    next_id += 1
-    tasks.append(new_task)
-    return new_task
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO tasks (title, done) VALUES (?, 0);", (payload.title,))
+        conn.commit()
+        new_id = cursor.lastrowid
+        return {
+            "id": new_id,
+            "title": payload.title,
+            "done": False,
+        }
 
 
 @app.put("/tasks/{id}", summary="Update an existing task")
