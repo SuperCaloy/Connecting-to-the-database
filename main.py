@@ -21,15 +21,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Temporary in-memory fallback for write stages
-tasks = [
-    {"id": 1, "title": "Buy groceries", "done": False},
-    {"id": 2, "title": "Read chapter 2", "done": True},
-    {"id": 3, "title": "Write unit tests", "done": False},
-]
-
-next_id = 4
-
 
 def task_row_to_dict(row) -> dict:
     return {
@@ -162,35 +153,41 @@ def update_task(
             content={"error": "At least one field (title or done) must be provided"},
         )
 
-    for task in tasks:
-        if task["id"] == id:
-            if payload.title is not None:
-                task["title"] = payload.title
-            if payload.done is not None:
-                task["done"] = payload.done
-            return task
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        existing = cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?;", (id,)).fetchone()
+        if existing is None:
+            return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
 
-    return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
+        new_title = payload.title if payload.title is not None else existing["title"]
+        new_done = (1 if payload.done else 0) if payload.done is not None else existing["done"]
+
+        cursor.execute(
+            "UPDATE tasks SET title = ?, done = ? WHERE id = ?;",
+            (new_title, new_done, id),
+        )
+        conn.commit()
+
+        return {
+            "id": id,
+            "title": new_title,
+            "done": bool(new_done),
+        }
 
 
 @app.delete("/tasks/{id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a task")
 def delete_task(id: int = Path(..., description="The ID of the task to delete")):
-    for i, task in enumerate(tasks):
-        if task["id"] == id:
-            tasks.pop(i)
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-    return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM tasks WHERE id = ?;", (id,))
+        conn.commit()
+        if cursor.rowcount == 0:
+            return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/reset", summary="Reset tasks to initial state", include_in_schema=False)
 def reset_tasks():
-    global tasks, next_id
-    tasks = [
-        {"id": 1, "title": "Buy groceries", "done": False},
-        {"id": 2, "title": "Read chapter 2", "done": True},
-        {"id": 3, "title": "Write unit tests", "done": False},
-    ]
-    next_id = 4
     reset_db()
     return {"message": "Tasks reset to initial state"}
 

@@ -88,7 +88,6 @@ def test_create_task_persists_in_database():
     assert data["title"] == "Learn SQLite"
     assert data["done"] is False
 
-    # Check direct database persistence
     with get_connection() as conn:
         row = conn.execute("SELECT id, title, done FROM tasks WHERE id = 4;").fetchone()
         assert row is not None
@@ -98,17 +97,14 @@ def test_create_task_persists_in_database():
 
 def test_create_task_validation():
     client = TestClient(app)
-    # Empty title
     res_empty = client.post("/tasks", json={"title": ""})
     assert res_empty.status_code == 400
     assert "error" in res_empty.json()
 
-    # Whitespace title
     res_ws = client.post("/tasks", json={"title": "   "})
     assert res_ws.status_code == 400
     assert "error" in res_ws.json()
 
-    # Missing title field
     res_missing = client.post("/tasks", json={})
     assert res_missing.status_code == 400
     assert "error" in res_missing.json()
@@ -120,9 +116,79 @@ def test_create_task_survives_restart():
     assert res.status_code == 201
     task_id = res.json()["id"]
 
-    # Simulate restart by re-initializing connection and app client without reset_db
     init_db()
     fresh_client = TestClient(app)
     get_res = fresh_client.get(f"/tasks/{task_id}")
     assert get_res.status_code == 200
     assert get_res.json()["title"] == "Persistent Task"
+
+
+def test_update_task_persists_in_database():
+    client = TestClient(app)
+    payload = {"title": "Buy organic groceries", "done": True}
+    response = client.put("/tasks/1", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {"id": 1, "title": "Buy organic groceries", "done": True}
+
+    # Verify directly in SQLite
+    with get_connection() as conn:
+        row = conn.execute("SELECT title, done FROM tasks WHERE id = 1;").fetchone()
+        assert row["title"] == "Buy organic groceries"
+        assert row["done"] == 1
+
+
+def test_update_task_partial_fields():
+    client = TestClient(app)
+    # Update title only
+    res1 = client.put("/tasks/1", json={"title": "New Title Only"})
+    assert res1.status_code == 200
+    assert res1.json() == {"id": 1, "title": "New Title Only", "done": False}
+
+    # Update done only
+    res2 = client.put("/tasks/1", json={"done": True})
+    assert res2.status_code == 200
+    assert res2.json() == {"id": 1, "title": "New Title Only", "done": True}
+
+
+def test_update_task_not_found():
+    client = TestClient(app)
+    res = client.put("/tasks/999", json={"title": "Ghost Task"})
+    assert res.status_code == 404
+    assert res.json() == {"error": "Task 999 not found"}
+
+
+def test_update_task_validation():
+    client = TestClient(app)
+    # Empty body
+    res_empty_body = client.put("/tasks/1", json={})
+    assert res_empty_body.status_code == 400
+    assert "error" in res_empty_body.json()
+
+    # Whitespace title
+    res_ws = client.put("/tasks/1", json={"title": "   "})
+    assert res_ws.status_code == 400
+    assert "error" in res_ws.json()
+
+
+def test_delete_task_from_database():
+    client = TestClient(app)
+    response = client.delete("/tasks/1")
+    assert response.status_code == 204
+    assert response.content == b""
+
+    # Verify directly in SQLite
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM tasks WHERE id = 1;").fetchone()[0]
+        assert count == 0
+
+    # Verify 404 on subsequent GET
+    get_res = client.get("/tasks/1")
+    assert get_res.status_code == 404
+
+
+def test_delete_task_not_found():
+    client = TestClient(app)
+    response = client.delete("/tasks/999")
+    assert response.status_code == 404
+    assert response.json() == {"error": "Task 999 not found"}
