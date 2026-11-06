@@ -5,4 +5,5 @@
 - 2026-11-06: Completed Stage 2 with TDD; replaced array push in POST /tasks with SQL INSERT and verified persistence across restarts.
 - 2026-11-06: Completed Stage 3 with TDD; implemented SQL UPDATE and DELETE in PUT /tasks/{id} and DELETE /tasks/{id}, and removed in-memory task lists.
 - 2026-11-06: Completed Stage 4; executed manual SQL statements (SELECT, COUNT, UPDATE, DELETE) against tasks.db and verified immediate synchronization via API.
+- 2026-11-06: Completed Stage 5; published comprehensive README with installation, schema viewer, rationale, and Stage 4 SQL verification.
 
