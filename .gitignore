@@ -4,4 +4,7 @@ __pycache__/
 .pytest_cache/
 *.log
 notes/
+.agents/
+AGENTS.md
+
 
