@@ -131,7 +131,6 @@ def test_update_task_persists_in_database():
     data = response.json()
     assert data == {"id": 1, "title": "Buy organic groceries", "done": True}
 
-    # Verify directly in SQLite
     with get_connection() as conn:
         row = conn.execute("SELECT title, done FROM tasks WHERE id = 1;").fetchone()
         assert row["title"] == "Buy organic groceries"
@@ -140,12 +139,10 @@ def test_update_task_persists_in_database():
 
 def test_update_task_partial_fields():
     client = TestClient(app)
-    # Update title only
     res1 = client.put("/tasks/1", json={"title": "New Title Only"})
     assert res1.status_code == 200
     assert res1.json() == {"id": 1, "title": "New Title Only", "done": False}
 
-    # Update done only
     res2 = client.put("/tasks/1", json={"done": True})
     assert res2.status_code == 200
     assert res2.json() == {"id": 1, "title": "New Title Only", "done": True}
@@ -160,12 +157,10 @@ def test_update_task_not_found():
 
 def test_update_task_validation():
     client = TestClient(app)
-    # Empty body
     res_empty_body = client.put("/tasks/1", json={})
     assert res_empty_body.status_code == 400
     assert "error" in res_empty_body.json()
 
-    # Whitespace title
     res_ws = client.put("/tasks/1", json={"title": "   "})
     assert res_ws.status_code == 400
     assert "error" in res_ws.json()
@@ -177,12 +172,10 @@ def test_delete_task_from_database():
     assert response.status_code == 204
     assert response.content == b""
 
-    # Verify directly in SQLite
     with get_connection() as conn:
         count = conn.execute("SELECT COUNT(*) FROM tasks WHERE id = 1;").fetchone()[0]
         assert count == 0
 
-    # Verify 404 on subsequent GET
     get_res = client.get("/tasks/1")
     assert get_res.status_code == 404
 
@@ -192,3 +185,45 @@ def test_delete_task_not_found():
     response = client.delete("/tasks/999")
     assert response.status_code == 404
     assert response.json() == {"error": "Task 999 not found"}
+
+
+def test_manual_sql_queries_live_api_reflection():
+    client = TestClient(app)
+
+    # 1. SELECT * FROM tasks;
+    with get_connection() as conn:
+        rows = conn.execute("SELECT * FROM tasks;").fetchall()
+        assert len(rows) == 3
+
+    # 2. SELECT * FROM tasks WHERE done = 1;
+    with get_connection() as conn:
+        done_rows = conn.execute("SELECT * FROM tasks WHERE done = 1;").fetchall()
+        assert len(done_rows) == 1
+        assert done_rows[0]["title"] == "Read chapter 2"
+
+    # 3. SELECT COUNT(*) FROM tasks;
+    with get_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM tasks;").fetchone()[0]
+        assert count == 3
+
+    # 4. UPDATE tasks SET done = 1;
+    with get_connection() as conn:
+        conn.execute("UPDATE tasks SET done = 1;")
+        conn.commit()
+
+    # Verify live reflection through GET /tasks
+    res_after_update = client.get("/tasks")
+    assert res_after_update.status_code == 200
+    all_tasks = res_after_update.json()
+    assert len(all_tasks) == 3
+    assert all(t["done"] is True for t in all_tasks)
+
+    # 5. DELETE FROM tasks WHERE done = 1;
+    with get_connection() as conn:
+        conn.execute("DELETE FROM tasks WHERE done = 1;")
+        conn.commit()
+
+    # Verify live reflection through GET /tasks (all were done=1, so list is now empty)
+    res_after_delete = client.get("/tasks")
+    assert res_after_delete.status_code == 200
+    assert res_after_delete.json() == []
