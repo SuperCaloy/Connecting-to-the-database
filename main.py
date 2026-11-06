@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
-from database import init_db, reset_db
+from database import get_connection, init_db, reset_db
 
 
 @asynccontextmanager
@@ -21,7 +21,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Temporary in-memory fallback for Stage 0 while verifying DB init
+# Temporary in-memory fallback for write stages
 tasks = [
     {"id": 1, "title": "Buy groceries", "done": False},
     {"id": 2, "title": "Read chapter 2", "done": True},
@@ -29,6 +29,14 @@ tasks = [
 ]
 
 next_id = 4
+
+
+def task_row_to_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "done": bool(row["done"]),
+    }
 
 
 class TaskCreate(BaseModel):
@@ -98,20 +106,34 @@ def get_tasks(
     done: Optional[bool] = None,
     search: Optional[str] = None,
 ):
-    result = tasks
+    query = "SELECT id, title, done FROM tasks"
+    params = []
+    conditions = []
+
     if done is not None:
-        result = [t for t in result if t["done"] == done]
+        conditions.append("done = ?")
+        params.append(1 if done else 0)
+
     if search:
-        search_lower = search.lower()
-        result = [t for t in result if search_lower in t["title"].lower()]
-    return result
+        conditions.append("LOWER(title) LIKE ?")
+        params.append(f"%{search.lower()}%")
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY id ASC;"
+
+    with get_connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [task_row_to_dict(r) for r in rows]
 
 
 @app.get("/tasks/{id}", summary="Get task by ID")
 def get_task(id: int = Path(..., description="The ID of the task to retrieve")):
-    for task in tasks:
-        if task["id"] == id:
-            return task
+    with get_connection() as conn:
+        row = conn.execute("SELECT id, title, done FROM tasks WHERE id = ?;", (id,)).fetchone()
+        if row is not None:
+            return task_row_to_dict(row)
     return JSONResponse(status_code=404, content={"error": f"Task {id} not found"})
 
 
